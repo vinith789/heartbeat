@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>🫀 ICU Heart Rate Monitor</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+    }
+    #status {
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .card {
+      border-left: 6px solid;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #fff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .normal {
+      border-color: #5cb85c;
+    }
+    .alert {
+      border-color: #d9534f;
+    }
+    .timestamp {
+      color: #666;
+      font-size: 0.85em;
+      margin-top: 6px;
+    }
+    canvas {
+      margin-top: 20px;
+      background: #fff;
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🫀 ICU Heart Rate Monitor</h1>
+  <div id="status">🔌 Connecting to server...</div>
+
+  <canvas id="chart" width="700" height="300"></canvas>
+
+  <h2>📝 Event Log</h2>
+  <div id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const log = document.getElementById("log");
+    const status = document.getElementById("status");
+
+    const labels = [];
+    const data = {
+      labels: labels,
+      datasets: [{
+        label: 'Heart Rate (bpm)',
+        data: [],
+        borderColor: '#007bff',
+        backgroundColor: 'rgba(0,123,255,0.1)',
+        tension: 0.4,
+        pointRadius: 3,
+      }]
+    };
+
+    const config = {
+      type: 'line',
+      data: data,
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            min: 40,
+            max: 160,
+            title: {
+              display: true,
+              text: 'Heart Rate (bpm)'
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Time'
+            }
+          }
+        }
+      }
+    };
+
+    const chart = new Chart(
+      document.getElementById('chart'),
+      config
+    );
+
+    const socket = new WebSocket("ws://localhost:8080");
+
+    socket.onopen = () => {
+      status.textContent = "✅ Connected to server";
+      status.style.color = "green";
+    };
+
+    socket.onclose = () => {
+      status.textContent = "❌ Disconnected from server";
+      status.style.color = "red";
+    };
+
+    socket.onerror = (error) => {
+      status.textContent = "⚠️ WebSocket error";
+      status.style.color = "orange";
+      console.error("WebSocket error:", error);
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const { heart_rate, anomaly_score, status: state, timestamp } = data;
+
+      // Add to chart
+      const time = new Date(timestamp).toLocaleTimeString();
+      labels.push(time);
+      chart.data.datasets[0].data.push(heart_rate);
+
+      if (labels.length > 30) {
+        labels.shift();
+        chart.data.datasets[0].data.shift();
+      }
+
+      chart.update();
+
+      // Add to log
+      const div = document.createElement("div");
+      div.className = "card " + (state === "ALERT" ? "alert" : "normal");
+      div.innerHTML = `
+        <strong>Status:</strong> ${state}<br>
+        <strong>Heart Rate:</strong> ${heart_rate} bpm<br>
+        <strong>Anomaly Score:</strong> ${anomaly_score.toFixed(3)}<br>
+        <div class="timestamp">🕒 ${new Date(timestamp).toLocaleString()}</div>
+      `;
+      log.prepend(div);
+    };
+  </script>
+
+</body>
+</html>
