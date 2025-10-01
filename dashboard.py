@@ -6,22 +6,44 @@ from kafka import KafkaConsumer
 import json
 import threading
 import queue
-import time
+import time, os
 
-# Queue to hold data from Kafka
+# Queue to hold data from Kafka or local file
 data_queue = queue.Queue()
 
-# Start Kafka consumer in background thread
-def consume_kafka():
-    consumer = KafkaConsumer(
-        'icu_heart_rate',
-        bootstrap_servers='localhost:9092',
-        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-    )
-    for msg in consumer:
-        data_queue.put(msg.value)
 
-threading.Thread(target=consume_kafka, daemon=True).start()
+# Start Kafka consumer in background thread; if Kafka unavailable, tail local_messages.jsonl
+def consume_kafka_or_local():
+    try:
+        consumer = KafkaConsumer(
+            'icu_heart_rate',
+            bootstrap_servers='localhost:9092',
+            value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+        )
+        for msg in consumer:
+            data_queue.put(msg.value)
+        return
+    except Exception:
+        # Fall back to local file mode
+        path = 'local_messages.jsonl'
+        last_pos = 0
+        while True:
+            if not os.path.exists(path):
+                time.sleep(1)
+                continue
+            with open(path, 'r', encoding='utf-8') as f:
+                f.seek(last_pos)
+                for line in f:
+                    try:
+                        data = json.loads(line.strip())
+                    except Exception:
+                        continue
+                    data_queue.put(data)
+                last_pos = f.tell()
+            time.sleep(1)
+
+
+threading.Thread(target=consume_kafka_or_local, daemon=True).start()
 
 # Initialize Dash app
 app = dash.Dash(__name__)
@@ -35,9 +57,9 @@ alert_logs = []
 # Layout
 app.layout = html.Div([
     html.H2("💓 Real-time ICU Heart Rate Dashboard"),
-    
+
     dcc.Graph(id='live-graph', style={'height': '60vh'}),
-    
+
     html.Div(id='alert-box', style={
         'color': 'red',
         'fontWeight': 'bold',
@@ -46,7 +68,7 @@ app.layout = html.Div([
         'border': '2px solid red',
         'marginTop': '10px'
     }),
-    
+
     dcc.Interval(id='interval-update', interval=1000, n_intervals=0),
 ])
 
@@ -62,7 +84,7 @@ def update_graph(n):
         record = data_queue.get()
         hr = record['current_hr']
         ts = record['timestamp']
-        
+
         heart_rates.append(hr)
         timestamps.append(ts)
 
